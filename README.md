@@ -6,14 +6,21 @@
 
 ## 怎么打开
 
-直接双击 `web/index.html` 就能玩（无需安装任何东西）。
-如果浏览器限制本地文件，可以在 `web` 目录下开一个本地服务：
+**在线版（GitHub Pages）**：<https://wanschan.github.io/LifeAfter/>
+
+本地：直接双击根目录的 `index.html` 就能玩（无需安装任何东西，贴图已内联）。
+如果浏览器限制本地文件，在项目根目录开一个本地服务：
 
 ```bash
-cd web
+cd LifeAfter
 python -m http.server 8848
 # 然后打开 http://127.0.0.1:8848
 ```
+
+Windows 也可以双击 `打开游戏.bat`。
+
+> 网页入口 `index.html` 和 `assets/` 就放在仓库根目录，
+> 所以 GitHub Pages 选 `main` 分支 + `/ (root)` 即可直接部署，不用再配子目录。
 
 ## 目前做到了什么
 
@@ -59,7 +66,7 @@ python -m http.server 8848
 ## 文件结构
 
 ```
-web/
+LifeAfter/                    ← 仓库根目录，也是静态站点根目录
 ├── index.html              页面骨架（含手绘纸图 fallback）
 ├── assets/
 │   ├── css/app.css         全部样式（暗色 · 电影感）
@@ -69,8 +76,21 @@ web/
 │   ├── map3d/tex.js        地形贴图 / 高度图 / 云贴图（内联 base64，离线可用）
 │   ├── map3d/three.min.js  本地 three.js r128
 │   └── img/                四张区域插画（卡片封面 + 剧本页背景）
-└── 打开游戏.bat            双击即用浏览器打开 index.html
+├── 打开游戏.bat            双击即用浏览器打开 index.html
+├── CHANGELOG.md            版本公告（26w46a 等）
+├── docs/                   剧情文本 / 生图脚本
+├── scripts/                发布到 GitHub 的脚本
+└── AppScope/ entry/ ...    鸿蒙 ArkTS 工程（与网页无关，可选的另一条线）
 ```
+
+## 部署静态网站
+
+仓库根目录已经有 `index.html`，资源全是相对路径 `assets/...`，
+所以 GitHub Pages 直接可用：仓库 **Settings → Pages → Build and deployment**
+选 `Deploy from a branch` → `main` / `/ (root)` → Save。
+
+项目站点的路径是 `https://wanschan.github.io/LifeAfter/`（子路径），
+因为所有引用都是相对路径，不会受子路径影响。推送新内容后 Pages 会自动重建。
 
 ## 地图怎么用
 

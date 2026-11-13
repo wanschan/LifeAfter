@@ -12,7 +12,7 @@ r"""
 可选环境变量：
     GH_REPO  仓库名，默认 LifeAfter
     GH_OWNER 用户名，默认从 /user 接口自动读取
-    GH_TAG   版本号，默认 26w46a（会读 CHANGELOG.md 里同名章节作为 Release 正文）
+    GH_TAG   版本号，默认读取 CHANGELOG.md 最上面的 ## 26w46x 标题
     GH_TITLE Release 标题，默认 "<TAG> · 项目发布"
 
 说明：本机 github.com:443 被代理阻断，git push 不可用，因此全程走 api.github.com REST。
@@ -20,6 +20,7 @@ token 只从环境变量读取，不会写进任何文件。
 """
 import os
 import io
+import re
 import sys
 import json
 import base64
@@ -30,9 +31,18 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOKEN = os.environ.get('GH_PAT')
 REPO = os.environ.get('GH_REPO', 'LifeAfter')
 OWNER = os.environ.get('GH_OWNER')
-TAG = os.environ.get('GH_TAG', '26w46a')
-TITLE = os.environ.get('GH_TITLE', TAG + ' · 项目发布')
 API = 'https://api.github.com'
+
+
+def detect_tag():
+    """版本号取 CHANGELOG.md 里最上面的 ## 26w46x 标题。"""
+    text = io.open(os.path.join(ROOT, 'CHANGELOG.md'), encoding='utf-8').read()
+    m = re.search(r'^##\s+(\d{2}w\d{2}[a-z])\s*$', text, re.M)
+    return m.group(1) if m else '26w46b'
+
+
+TAG = os.environ.get('GH_TAG') or detect_tag()
+TITLE = os.environ.get('GH_TITLE', TAG + ' · 项目发布')
 
 EXCLUDE_DIRS = {
     '.git', '.workbuddy', '.idea', '.hvigor', 'oh_modules', 'node_modules',
@@ -129,8 +139,13 @@ def main():
     st, t = call('POST', base + '/git/trees', {'tree': tree})
     if st != 201:
         sys.exit('tree 失败 %s %s' % (st, t.get('message')))
+    # 保留远端历史：以当前 main 的 HEAD 作为父提交（仓库为空时才建根提交）
+    parents = []
+    st_h, head = call('GET', base + '/git/ref/heads/main')
+    if st_h == 200 and head.get('object', {}).get('sha'):
+        parents = [head['object']['sha']]
     st, c = call('POST', base + '/git/commits', {
-        'message': TAG + ' · 项目发布', 'tree': t['sha'], 'parents': [],
+        'message': TAG + ' · 项目更新', 'tree': t['sha'], 'parents': parents,
         'author': {'name': OWNER, 'email': OWNER + '@users.noreply.github.com'},
         'committer': {'name': OWNER, 'email': OWNER + '@users.noreply.github.com'},
     })
@@ -152,7 +167,12 @@ def main():
     # Release
     changelog = io.open(os.path.join(ROOT, 'CHANGELOG.md'), encoding='utf-8').read()
     marker = '## ' + TAG
-    body = changelog[changelog.index(marker):].strip() if marker in changelog else TAG + ' 发布'
+    if marker in changelog:
+        tail = changelog[changelog.index(marker):]
+        nxt = re.search(r'^##\s+\d{2}w\d{2}[a-z]\s*$', tail[len(marker):], re.M)
+        body = tail[:len(marker) + nxt.start()].strip() if nxt else tail.strip()
+    else:
+        body = TAG + ' 发布'
     st, rel = call('POST', base + '/releases', {
         'tag_name': TAG, 'target_commitish': 'main',
         'name': TITLE, 'body': body,
@@ -168,7 +188,11 @@ def main():
     else:
         print('· Release 创建失败（可稍后手动发）:', st, rel.get('message'))
 
-    print('\nDONE  https://github.com/%s/%s' % (OWNER, REPO))
+    # Pages 通常会自动重建；这里补一次显式请求（没权限也不影响发布）
+    call('POST', base + '/pages/builds', {})
+
+    print('\nDONE  仓库: https://github.com/%s/%s' % (OWNER, REPO))
+    print('      站点: https://%s.github.io/%s/' % (OWNER, REPO))
 
 
 if __name__ == '__main__':
