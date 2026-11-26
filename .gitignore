@@ -3,6 +3,7 @@
 /local.properties
 /.idea
 /.workbuddy
+/.tmp
 /dist
 __pycache__/
 **/build

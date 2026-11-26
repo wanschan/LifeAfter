@@ -26,6 +26,7 @@ import json
 import base64
 import urllib.request
 import urllib.error
+import urllib.parse
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOKEN = os.environ.get('GH_PAT')
@@ -47,6 +48,8 @@ TITLE = os.environ.get('GH_TITLE', TAG + ' · 项目发布')
 EXCLUDE_DIRS = {
     '.git', '.workbuddy', '.idea', '.hvigor', 'oh_modules', 'node_modules',
     'build', '.cxx', '.test', '.appanalyzer', '__pycache__', 'dist',
+    '.tmp',            # hvigor 增量编译缓存，动辄几十 MB，绝不能进仓库
+    '.preview', '.gradle', 'oh-package-cache',
 }
 EXCLUDE_FILES = {'local.properties', '.DS_Store'}
 EXCLUDE_EXT = {'.hap', '.log', '.tmp', '.pyc', '.zip'}
@@ -178,21 +181,74 @@ def main():
         'name': TITLE, 'body': body,
         'draft': False, 'prerelease': False,
     })
+    rel_id = None
     if st == 201:
-        print('✓ Release:', rel['html_url'])
+        rel_id = rel['id']
+        print('✓ Release:', rel['html_url'], '(%s)' % TAG)
     elif st == 422:
         st2, rs = call('GET', base + '/releases/tags/' + TAG)
         if st2 == 200:
-            st3, _ = call('PATCH', base + '/releases/' + str(rs['id']), {'body': body})
+            rel_id = rs['id']
+            st3, _ = call('PATCH', base + '/releases/' + str(rel_id), {'body': body})
             print('· Release 已存在，更新正文:', st3)
+        else:
+            print('· Release 已存在但读不到:', st2)
     else:
         print('· Release 创建失败（可稍后手动发）:', st, rel.get('message'))
+
+    # 把编译好的 HAP 挂到 Release 附件，用户可以直接下载安装
+    if rel_id:
+        upload_asset(base, rel_id, TAG)
 
     # Pages 通常会自动重建；这里补一次显式请求（没权限也不影响发布）
     call('POST', base + '/pages/builds', {})
 
     print('\nDONE  仓库: https://github.com/%s/%s' % (OWNER, REPO))
     print('      站点: https://%s.github.io/%s/' % (OWNER, REPO))
+
+
+def find_hap():
+    """取最近编译出来的 HAP；没有就返回 None（附件是可选项）。"""
+    out_dir = os.path.join(ROOT, 'entry', 'build', 'default', 'outputs', 'default')
+    if not os.path.isdir(out_dir):
+        return None
+    cands = [os.path.join(out_dir, n) for n in os.listdir(out_dir) if n.endswith('.hap')]
+    if not cands:
+        return None
+    return max(cands, key=os.path.getmtime)
+
+
+def upload_asset(base, rel_id, tag):
+    hap = find_hap()
+    if not hap:
+        print('· 没有找到 HAP，跳过附件上传')
+        return
+    name = 'LifeAfter-%s-harmony-unsigned.hap' % tag
+    raw = open(hap, 'rb').read()
+    # 已存在同名附件就先删掉，避免 422 already_exists
+    st, assets = call('GET', base + '/releases/%d/assets' % rel_id)
+    if st == 200:
+        for a in assets:
+            if a.get('name') == name:
+                call('DELETE', '/repos/%s/%s/releases/assets/%d' % (OWNER, REPO, a['id']))
+    url = 'https://uploads.github.com/repos/%s/%s/releases/%d/assets?name=%s' % (
+        OWNER, REPO, rel_id, urllib.parse.quote(name))
+    req = urllib.request.Request(url, data=raw, method='POST', headers={
+        'Authorization': 'Bearer ' + TOKEN,
+        'Accept': 'application/vnd.github+json',
+        'Content-Type': 'application/vnd.harmonyos.hap',
+        'User-Agent': 'lifeafter-publisher',
+        'X-GitHub-Api-Version': '2022-11-28',
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=180) as r:
+            info = json.loads(r.read().decode('utf-8'))
+        print('✓ 附件 %s (%.2f MB)' % (info.get('name'), len(raw) / 1048576))
+    except urllib.error.HTTPError as e:
+        msg = e.read().decode('utf-8') or '{}'
+        print('· 附件上传失败 %s %s' % (e.code, msg[:200]))
+    except Exception as e:                     # 网络抖动不影响主流程
+        print('· 附件上传异常:', e)
 
 
 if __name__ == '__main__':

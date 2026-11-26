@@ -2,15 +2,15 @@
   "string": [
     {
       "name": "module_desc",
-      "value": "module description"
+      "value": "余烬纪 · 末日生存文字冒险"
     },
     {
       "name": "EntryAbility_desc",
-      "value": "description"
+      "value": "余烬纪游戏入口"
     },
     {
       "name": "EntryAbility_label",
-      "value": "label"
+      "value": "余烬纪"
     }
   ]
 }

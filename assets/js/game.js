@@ -122,6 +122,8 @@
     w.appendChild(d);
     setTimeout(() => d.remove(), 2200);
   }
+  // 给 region.js / drama.js 这类旁挂模块共用
+  window.toast = toast;
 
   /* ============================================================
      富文本 + 打字机
@@ -209,7 +211,15 @@
     $('#pro-text').innerHTML = '';
     $('#pro-next').innerHTML = '继续 <span>›</span>';
     show('scr-prologue');
+    if (window.SceneImages) setProBg(SceneImages.forPrologueLine(0));
     proTimer = setTimeout(proTick, 420);
+  }
+
+  /* 序章背景：与正文共用双层交叉淡入，解码完成再上屏，同一张图不重复切换 */
+  function setProBg(url) {
+    const pbg = $('.pro-bg');
+    if (!pbg || !url) return;
+    fadeLayers(pbg, url, proState);
   }
 
   function addLine(line) {
@@ -220,6 +230,8 @@
     box.appendChild(p);
     requestAnimationFrame(() => p.classList.add('on'));
     box.scrollTop = box.scrollHeight;
+    // 序章按行换背景：医院 -> 熄灯 -> 方舟 -> 西陆平原（proIndex 已自增，故 -1）
+    if (window.SceneImages) setProBg(SceneImages.forPrologueLine(proIndex - 1));
   }
 
   function proTick() {
@@ -328,6 +340,10 @@
     openMapCard(rid);
   }
 
+  /* 「地区」页签下 showMap 会跳过 3D 初始化，切回「世界」时要能补上，
+     所以把这个内部函数挂出去给 region.js 用 */
+  window.ensureMap3D = ensureMap3D;
+
   async function ensureMap3D() {
     if (map3dReady) return true;
     if (map3dBusy) return false;
@@ -369,15 +385,24 @@
   function showMap(reset) {
     closeMapCard(true);
     show('scr-map');
+    // 「地区」页签下不初始化 3D：模拟器/低端机省一次 WebGL 上下文，也避免画布盖住剧本列表
+    if (window.RegionTab && window.RegionTab.isRegion()) {
+      window.RegionTab.apply();
+      return;
+    }
+    const scr = $('#scr-map');
     const hint = $('#map-hint');
     if (hint) hint.textContent = '拖动旋转 · 滚轮缩放 · 点击地标';
     ensureMap3D().then(ok => {
       if (!ok) {
+        // 纸图模式：比例尺、复位视角这些只对 3D 有意义，收起来
+        if (scr) scr.classList.add('map-fallback');
         const aw = $('#atlas-wrap');
         if (aw) aw.hidden = false;
-        if (hint) hint.textContent = '选择一片区域 · 镜头会推近';
+        if (hint) hint.textContent = '选择一片区域 · 点击纸上的地名';
         return;
       }
+      if (scr) scr.classList.remove('map-fallback');
       requestAnimationFrame(() => {
         Map3D.resize();
         Map3D.show();
@@ -457,12 +482,12 @@
       $('#mp-ruler').textContent = r.ruler;
       $('#mp-climate').textContent = r.climate;
       pv.classList.add('on');
-      const lab = $('#atlas .rlabel[data-region="' + rid + '"]');
+      const lab = $('.atlas-pin[data-region="' + rid + '"]');
       if (lab) lab.classList.add('lit');
     }
     function hidePreview() {
       if (pv) pv.classList.remove('on');
-      $$('#atlas .rlabel').forEach(l => l.classList.remove('lit'));
+      $$('.atlas-pin').forEach(l => l.classList.remove('lit'));
     }
     function placePreview(e) {
       if (!pv) return;
@@ -478,16 +503,16 @@
       pv.style.top = y + 'px';
     }
 
-    $$('.region').forEach(g => {
+    // ---- 纸图上的区域热区（位图版，位置由 HTML 里的 % 定位决定）----
+    $$('.atlas-pin').forEach(g => {
       g.addEventListener('mouseenter', e => { showPreview(g.dataset.region); placePreview(e); });
       g.addEventListener('mousemove', e => { if (pv && pv.classList.contains('on')) placePreview(e); });
       g.addEventListener('mouseleave', hidePreview);
       g.addEventListener('click', () => {
         const rid = g.dataset.region;
-        const r = REGIONS.find(x => x.id === rid);
-        if (!r) return;
+        if (!REGIONS.find(x => x.id === rid)) return;
         hidePreview();
-        showScenario(rid);
+        openMapCard(rid);
       });
     });
   }
@@ -501,7 +526,10 @@
     const r = REGIONS.find(x => x.id === rid);
     if (!r) return;
     currentRegionId = rid;
-    $('#sc-bg').style.backgroundImage = `url('${r.img}')`;
+    const cover = window.SceneImages && SceneImages.cover(rid);
+    const scBg = $('#sc-bg');
+    scBg.style.backgroundImage = `url('${cover || r.img}')`;
+    scBg.classList.toggle('has-scene', !!cover);
     $('#sc-kicker').innerHTML = '<span class="line"></span>' + r.en + ' / ' + (r.climate || '');
     $('#sc-name').textContent = r.name;
     $('#sc-sub').textContent = r.tagline || r.ruler;
@@ -566,14 +594,74 @@
   /* ============================================================
      游戏主循环
      ============================================================ */
+  /* 双层交叉淡入：新图先预解码，再在原位淡入并把旧层淡出。
+     任何时刻都至少有一层是有图的，所以永远不会露出黑底。 */
+  function fadeLayers(box, url, state) {
+    const layers = box.querySelectorAll('.pb-layer');
+    if (!layers.length) {
+      box.style.backgroundImage = `url('${url}')`;
+      return;
+    }
+
+    // 单层模式（鸿蒙 ArkWeb 用）：两层全屏背景图叠在一起时，软件合成器会把
+    // 下半屏的 tile 丢掉不画。图片已经过 decode 预热，直接换 background-image
+    // 不会出现黑帧，所以这里退化成单层直切，稳得多。
+    if (window.__HM_NO_XFADE) {
+      const nextUrlOnly = `url('${url}')`;
+      if (box.style.backgroundImage === nextUrlOnly) return;
+      layers.forEach(l => { l.classList.remove('on'); l.style.backgroundImage = ''; });
+      box.style.backgroundImage = nextUrlOnly;
+      return;
+    }
+
+    const cur = layers[state.i];
+    const nextUrl = `url('${url}')`;
+    // 当前可见层已经是这张图：什么都不用做（相邻节点大量复用同图）
+    if (cur.style.backgroundImage === nextUrl) return;
+
+    const nextIdx = state.i ^ 1;
+    const next = layers[nextIdx];
+    next.style.backgroundImage = nextUrl;
+
+    let done = false;
+    const reveal = () => {
+      if (done) return;
+      done = true;
+      next.classList.add('on');
+      cur.classList.remove('on');
+      state.i = nextIdx;
+    };
+    // ArkWeb 上 decode() 有可能一直不 resolve，加超时兜底，避免新图永不显示
+    setTimeout(reveal, 420);
+    const img = new Image();
+    img.onload = () => { (img.decode ? img.decode().catch(() => {}) : Promise.resolve()).then(reveal); };
+    img.onerror = reveal;
+    img.src = url;
+  }
+
+  const pbState = { i: 0 };
+  const proState = { i: 0 };
+
   function setPlayBg(node) {
     const place = node.place;
     const region = REGIONS.find(r => r.id === (S ? S.region : 'xilu'));
     const bg = $('#play-bg');
-    bg.style.backgroundImage = `url('${region ? region.img : ''}')`;
-    bg.className = 'play-bg';
-    const tint = node.bg === 'cabin' ? 'tint-red' : (PLACE_TINT[place] || '');
-    if (tint) bg.classList.add(tint);
+    // 优先用分场插画；该幕还没出图时回退到区域封面
+    const scene = window.SceneImages && SceneImages.forNode(curNodeId);
+    const url = scene || (region ? region.img : '');
+    if (!url) return;
+
+    // 只在类名真的变化时才改，避免每次重置 className 把 filter 过渡重跑一遍（那会闪）
+    let want = 'play-bg';
+    if (scene) {
+      want += ' has-scene';
+    } else {
+      const tint = node.bg === 'cabin' ? 'tint-red' : (PLACE_TINT[place] || '');
+      if (tint) want += ' ' + tint;
+    }
+    if (bg.className !== want) bg.className = want;
+
+    fadeLayers(bg, url, pbState);
   }
 
   function updateHud(node) {

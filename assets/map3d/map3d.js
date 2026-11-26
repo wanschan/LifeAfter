@@ -370,7 +370,7 @@
   }
   function baseRadius() {
     const a = aspect();
-    if (a < 0.62) return 3300;
+    if (a < 0.62) return 3500;
     if (a < 0.85) return 3400;
     if (a < 1.2) return 2950;
     return 2700;
@@ -384,7 +384,7 @@
   }
   function baseTx() {
     const a = aspect();
-    if (a < 0.62) return -620;
+    if (a < 0.62) return -460;
     if (a < 0.85) return -460;
     if (a < 1.2) return -300;
     return -160;
@@ -460,6 +460,17 @@
   window.Map3D = {
     init: init, focus: focus, reset: reset, highlight: highlight,
     show: show, hide: hide, resize: resize,
-    destroy: destroy, supported: supported
+    destroy: destroy, supported: supported,
+    /* 调试用：读相机真实状态，排查取景问题 */
+    debug: function () {
+      return {
+        cam: cam, goal: goal, size: SIZE,
+        aspect: camera ? camera.aspect : 0,
+        fov: camera ? camera.fov : 0,
+        pos: camera ? camera.position.toArray() : null,
+        w: wrapEl ? wrapEl.clientWidth : 0,
+        h: wrapEl ? wrapEl.clientHeight : 0
+      };
+    }
   };
 })();

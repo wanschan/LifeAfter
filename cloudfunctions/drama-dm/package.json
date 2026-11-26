@@ -1,0 +1,8 @@
+{
+  "name": "drama-dm",
+  "version": "1.0.0",
+  "description": "剧本杀 DM：只改写叙述口吻，判定仍在本地规则骨架里",
+  "main": "index.js",
+  "private": true,
+  "dependencies": {}
+}

@@ -37,8 +37,31 @@ Windows 也可以双击 `打开游戏.bat`。
 | 3 个手动存档槽 + 自动存档 + 继续游戏 | ✅ |
 | 8 个结局（含 3 个 Death End） | ✅ |
 | 移动端适配 | ✅ |
+| 地图顶栏 **世界 / 地区** 两态切换 | ✅ |
+| 剧本杀「地区」列表 + 票据入场动画 + 剧本开始页 | ✅ |
+| 剧本杀《西下城区》· 三幕 · 12 条线索 · 双结局 | ✅ |
+| 剧本杀线索 / 人物屏 | ✅ |
 
 **西陆平原**是完整可玩的一章；北陆高原、孤山、南印洲目前只有设定页和入口（"剧本封存中"）。
+
+**剧本杀模块**：地图页顶栏切到「地区」能看到维兰索尔三处地点
+（西下城区 / 大礼拜堂 / 四方驿站），点进去是撕票根 + 盖章的入场动画，
+落点是「剧本开始」页。
+
+其中 **《西下城区》已经能玩**：三幕、12 条线索、5 个嫌疑人、两套结局。
+DM 是本地规则引擎（`assets/js/drama.js`），输入的动作用 `keys` 最长匹配判定，
+不需要联网、不需要 API key。另外两处仍是「剧本筹备中」。
+
+想让 DM 说话不那么死板，可以接云端改写（可选，不影响判定）：
+
+```js
+window.Drama.setRemote('https://<ENV_ID>.service.tcloudbase.com/drama-dm');
+```
+
+云函数在 `cloudfunctions/drama-dm/`，清单与部署命令见
+`docs/云端准备-剧本杀AI.md`。断网或报错会自动退回本地原文。
+
+想换 / 加剧本只改 `assets/js/drama-data.js`，引擎不动。
 
 ## 一条主线怎么走
 
@@ -67,21 +90,98 @@ Windows 也可以双击 `打开游戏.bat`。
 
 ```
 LifeAfter/                    ← 仓库根目录，也是静态站点根目录
-├── index.html              页面骨架（含手绘纸图 fallback）
+├── index.html              页面骨架
 ├── assets/
 │   ├── css/app.css         全部样式（暗色 · 电影感）
 │   ├── js/data.js          ★ 全部剧情 + 四个区域的入口数据
+│   ├── js/scenes.js        25 张分场插画 ↔ 剧情节点映射
+│   ├── js/region.js        剧本杀：世界/地区切换、剧本列表、票据入场动画
+│   ├── js/drama-data.js    ★ 剧本杀剧本数据（幕 / 线索 / 人物 / 结局）
+│   ├── js/drama.js         ★ 剧本杀引擎：规则 DM、线索面板、存档、云端改写开关
 │   ├── js/game.js          引擎：状态机 / 打字机 / 存档 / 地图UI
 │   ├── map3d/map3d.js      three.js 场景：位移地形 + 海面 + 云 + 悬浮地标
 │   ├── map3d/tex.js        地形贴图 / 高度图 / 云贴图（内联 base64，离线可用）
 │   ├── map3d/three.min.js  本地 three.js r128
-│   └── img/                四张区域插画（卡片封面 + 剧本页背景）
+│   ├── map3d/atlas-bake.html  手绘纸图的 SVG 源（只用于烘焙，不参与运行）
+│   └── img/                区域插画 + 分场插画 + 纸图位图
 ├── 打开游戏.bat            双击即用浏览器打开 index.html
 ├── CHANGELOG.md            版本公告（26w46a 等）
 ├── docs/                   剧情文本 / 生图脚本
-├── scripts/                发布到 GitHub 的脚本
-└── AppScope/ entry/ ...    鸿蒙 ArkTS 工程（与网页无关，可选的另一条线）
+├── cloudfunctions/drama-dm/  可选：AI DM 改写云函数（不接也能玩）
+├── scripts/
+│   ├── publish_github.py   发布到 GitHub
+│   ├── bake_atlas.py       ★ 重建手绘纸图 assets/img/atlas.webp
+│   ├── arkweb_devtools.js  ★ 对设备上的 ArkWeb 页面执行 JS
+│   └── build_harmony_html.py  ★ 生成鸿蒙专用的自包含 HTML
+├── AppScope/               鸿蒙应用全局配置（应用名 / 图标 / 包名）
+└── entry/                  ★ 鸿蒙 ArkTS 工程
+    └── src/main/
+        ├── ets/pages/Index.ets        ArkWeb 承载页 + 返回键桥接
+        ├── ets/entryability/...       沉浸式全屏设置
+        └── resources/rawfile/
+            └── index.html             由 build_harmony_html.py 生成，勿手改
 ```
+
+## 鸿蒙应用
+
+同一个游戏已经打包成 HarmonyOS 应用：用 **ArkWeb** 承载整套网页，
+剧情、3D 地形、25 张分场插画、存档全部原样保留，不是另写一套简化版。
+
+**核心做法**：`scripts/build_harmony_html.py` 把根目录的 `index.html`、
+CSS、6 个 JS、纸图位图、4 张区域图和 25 张插画全部内联成一个 4.42 MB 的自包含 HTML，
+写到 `entry/src/main/resources/rawfile/index.html`。运行时零外部请求，
+所以不需要网络就能玩，也避开了 rawfile 相对路径的坑。
+
+打包时还会做三件鸿蒙专用的事：
+
+- 关掉 `backdrop-filter` / `mix-blend-mode` / 大尺寸投影滤镜
+  （软件渲染下每个都会多开一张整屏渲染表面，贴图内存一超限，Chromium 就整条内容不画）；
+- 注入 `window.__HM_NO_XFADE = true`，背景切换走单层直切
+  （两层全屏图叠加会丢下半屏 tile，图片已预解码，直切不黑帧）；
+- 分场插画与区域图按 1100 宽重新编码，解码内存减半。
+
+**手绘纸图**是预烘焙位图 `assets/img/atlas.webp`，SVG 源在
+`assets/map3d/atlas-bake.html`。换图跑：
+
+```bash
+python scripts/bake_atlas.py
+```
+
+**改了网页之后**，重新生成一次：
+
+```bash
+python scripts/build_harmony_html.py
+```
+
+**命令行编译**（无需打开 DevEco Studio）：
+
+```bash
+cd LifeAfter
+export DEVECO_SDK_HOME="D:/Huawei/DevEco Studio/sdk"
+"D:/Huawei/DevEco Studio/tools/node/node.exe" \
+  "D:/Huawei/DevEco Studio/tools/hvigor/bin/hvigorw.js" \
+  assembleHap --mode module -p product=default -p buildMode=debug --no-daemon
+```
+
+产物在 `entry/build/default/outputs/default/entry-default-unsigned.hap`。
+这是**未签名**包，只能在 DevEco 模拟器上安装；真机需要在 DevEco Studio 里配置签名。
+
+**返回键**：网页侧注入了 `window.__appBack()`，按弹窗 → 结局页 → 子地图 →
+剧本页 → 游戏内的顺序逐层回退，到标题页再按才退出应用。
+
+**真机/模拟器调试**：ArkWeb 没有 adb 式入口，靠 DevTools socket 转发。
+`scripts/arkweb_devtools.js` 是对着转发端口执行 JS 的小工具：
+
+```bash
+hdc shell ps -ef | grep <包名>            # 拿到 webview 进程 pid
+hdc fport tcp:9222 localabstract:webview_devtools_remote_<pid>
+node scripts/arkweb_devtools.js "window.__diag()"
+node scripts/arkweb_devtools.js "document.querySelectorAll('.mk')[1].click(); 'ok'"
+```
+
+只用 `Runtime.evaluate`。`Page.captureScreenshot` 在 ArkWeb 上会把连接掐断，
+截图请走 `hdc shell snapshot_display`（输出的是物理像素，点按坐标要按
+`物理宽/CSS 宽` 的比例换算，模拟器上约 2.875）。
 
 ## 部署静态网站
 
@@ -130,6 +230,51 @@ q07_xxx: {
 - 节点加 `end: true` 表示这一处探索结束，点「继续」回到子地图。
 - 选项 `to: 'e_xxx'` 直接跳结局，结局文案写在 `ENDINGS` 里。
 - 新增子地图要同时改 `PLACES`、`ENTRY`，以及 `game.js` 里的 `placeState()` 解锁规则。
+
+**加一个剧本杀剧本**：在 `assets/js/drama-data.js` 的 `window.DRAMA_SCRIPTS` 里加一个键，
+最小骨架长这样——
+
+```js
+'my-script': {
+  id: 'my-script',
+  title: '剧本简称',
+  full: '维兰索尔-某某地点',
+  en: 'SOME PLACE',
+  prologue: [ { who: 'narrator', say: '开场第一段。' } ],
+  npcs: {
+    narrator: { name: '旁白', role: '', color: '#8a7f6a' },
+    foo:      { name: '某人', role: '身份', color: '#c9a24a' }
+  },
+  clues: { C01: { name: '线索名', text: '线索正文。' } },
+  acts: {
+    A1: {
+      name: '第一幕', place: '地点',
+      intro: [ { who: 'narrator', say: '进幕叙述。' } ],
+      hint: ['看桌子'],                       // 建议动作，点一下即提交
+      actions: [
+        { keys: ['桌子', '抽屉'], who: 'narrator', say: '你打开抽屉。',
+          give: ['C01'] },                     // give 可以给多条
+        { keys: ['走', '离开'], who: 'narrator', say: '你离开了。',
+          next: 'A2' }
+      ],
+      fallback: ['这里没有那样东西。']         // 没命中时随机挑一句
+    },
+    A2: { name: '第二幕', place: '地点', accuse: true, intro: [], hint: ['指认 某人'] }
+  },
+  endings: {
+    win:  { title: '结局 · 真', lines: ['……'] },
+    lose: { title: '结局 · 假', lines: ['……'] }
+  },
+  culprit: 'foo',
+  solidProof: [['C01']]
+}
+```
+
+判定规则：标签 `keys` 里任意词出现在玩家输入里就算命中（取最长匹配）；
+`once` 默认 `true`，同一条判定给过就不再给；`next` 切幕；
+第三幕 `accuse: true` 只认「指认 名字」，答对 `culprit` 且满足任意一组
+`solidProof` 才走 `win`。写完记得在 `assets/js/region.js` 的 `DRAMAS` 里
+加一张卡片（`id` 对上），不然地区列表里看不到。
 
 **换成动画序章**：`PROLOGUE` 数组是现在用文字顶替的背景介绍。等你的素材做好了，把 `#scr-prologue` 里的 `.pro-text` 换成 `<video>` 或序列帧容器，播完调用 `proAct()` 即可，其余流程不用改。
 
